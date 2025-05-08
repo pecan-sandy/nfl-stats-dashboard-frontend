@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ensure basic document structure for height calculation */
+html, body {
+  height: 100%; /* Or min-height: 100% if preferred */
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  /* overflow-x: hidden; */ /* Temporarily remove this to check double scrollbar */
+  background-color: #111827; /* Match LandingPage bg for consistency */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  color: #fff; /* Default text color */
+}
+
+/* Ensure the React root element can grow */
+#root {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Add smooth scrolling behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Background Patterns */
+.bg-grid-pattern {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Style scrollbar for a more modern look (optional) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937; /* gray-800 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563; /* gray-600 */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; /* gray-500 */
+}
+
+/* Add specific styles for team card layout */
+.team-card {
+  /* You can add specific card styles here if needed */
+}
+
+/* Styles for react-query devtools (if used) */
+/* Ensure devtools don't interfere with layout */

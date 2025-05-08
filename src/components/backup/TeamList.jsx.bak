@@ -1,0 +1,1541 @@
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
+import {
+    ResponsiveContainer,
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    Tooltip as RechartsTooltip,
+    Legend,
+    RadarChart,
+    PolarGrid,
+    PolarAngleAxis,
+    PolarRadiusAxis,
+    Radar,
+    ScatterChart,
+    Scatter,
+    ZAxis,
+    Cell,
+    ReferenceLine
+} from 'recharts';
+
+// NFL team colors
+const TEAM_COLORS = {
+    ARI: '#97233F',
+    ATL: '#A71930',
+    BAL: '#241773',
+    BUF: '#00338D',
+    CAR: '#0085CA',
+    CHI: '#0B162A',
+    CIN: '#FB4F14',
+    CLE: '#311D00',
+    DAL: '#003594',
+    DEN: '#FB4F14',
+    DET: '#0076B6',
+    GB: '#203731',
+    HOU: '#03202F',
+    IND: '#002C5F',
+    JAX: '#101820',
+    KC: '#E31837',
+    LAC: '#0080C6',
+    LAR: '#003594',
+    LV: '#000000',
+    MIA: '#008E97',
+    MIN: '#4F2683',
+    NE: '#002244',
+    NO: '#D3BC8D',
+    NYG: '#0B2265',
+    NYJ: '#125740',
+    PHI: '#004C54',
+    PIT: '#FFB612',
+    SEA: '#002244',
+    SF: '#AA0000',
+    TB: '#D50A0A',
+    TEN: '#0C2340',
+    WAS: '#773141'
+};
+
+// Helper function to calculate percentile for a stat
+const calculatePercentile = (value, allValues) => {
+    if (!allValues.length) return 0;
+    const sortedValues = [...allValues].sort((a, b) => a - b);
+    const index = sortedValues.findIndex(v => v >= value);
+    return Math.round((index / sortedValues.length) * 100);
+};
+
+// --- Team Logo Fallback Map (Use if API doesn't provide logo) ---
+const logoFallbackMap = {
+    'ARI': 'https://a.espncdn.com/i/teamlogos/nfl/500/ari.png',
+    'ATL': 'https://a.espncdn.com/i/teamlogos/nfl/500/atl.png',
+    'BAL': 'https://a.espncdn.com/i/teamlogos/nfl/500/bal.png',
+    'BUF': 'https://a.espncdn.com/i/teamlogos/nfl/500/buf.png',
+    'CAR': 'https://a.espncdn.com/i/teamlogos/nfl/500/car.png',
+    'CHI': 'https://a.espncdn.com/i/teamlogos/nfl/500/chi.png',
+    'CIN': 'https://a.espncdn.com/i/teamlogos/nfl/500/cin.png',
+    'CLE': 'https://a.espncdn.com/i/teamlogos/nfl/500/cle.png',
+    'DAL': 'https://a.espncdn.com/i/teamlogos/nfl/500/dal.png',
+    'DEN': 'https://a.espncdn.com/i/teamlogos/nfl/500/den.png',
+    'DET': 'https://a.espncdn.com/i/teamlogos/nfl/500/det.png',
+    'GB': 'https://a.espncdn.com/i/teamlogos/nfl/500/gb.png',
+    'HOU': 'https://a.espncdn.com/i/teamlogos/nfl/500/hou.png',
+    'IND': 'https://a.espncdn.com/i/teamlogos/nfl/500/ind.png',
+    'JAX': 'https://a.espncdn.com/i/teamlogos/nfl/500/jax.png',
+    'KC': 'https://a.espncdn.com/i/teamlogos/nfl/500/kc.png',
+    'LV': 'https://a.espncdn.com/i/teamlogos/nfl/500/lv.png',
+    'LAC': 'https://a.espncdn.com/i/teamlogos/nfl/500/lac.png',
+    'LAR': 'https://a.espncdn.com/i/teamlogos/nfl/500/lar.png',
+    'MIA': 'https://a.espncdn.com/i/teamlogos/nfl/500/mia.png',
+    'MIN': 'https://a.espncdn.com/i/teamlogos/nfl/500/min.png',
+    'NE': 'https://a.espncdn.com/i/teamlogos/nfl/500/ne.png',
+    'NO': 'https://a.espncdn.com/i/teamlogos/nfl/500/no.png',
+    'NYG': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyg.png',
+    'NYJ': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png',
+    'PHI': 'https://a.espncdn.com/i/teamlogos/nfl/500/phi.png',
+    'PIT': 'https://a.espncdn.com/i/teamlogos/nfl/500/pit.png',
+    'SEA': 'https://a.espncdn.com/i/teamlogos/nfl/500/sea.png',
+    'SF': 'https://a.espncdn.com/i/teamlogos/nfl/500/sf.png',
+    'TB': 'https://a.espncdn.com/i/teamlogos/nfl/500/tb.png',
+    'TEN': 'https://a.espncdn.com/i/teamlogos/nfl/500/ten.png',
+    'WAS': 'https://a.espncdn.com/i/teamlogos/nfl/500/wsh.png'
+};
+
+const getTeamLogo = (team) => {
+    // Prioritize API fields, then fall back to map
+    return team.team_logo_espn || team.team_logo || logoFallbackMap[team.team_abbr] || 'https://via.placeholder.com/100?text=N/A';
+};
+// ------------------------------------------------------------------
+
+export default function TeamList() {
+    const [teams, setTeams] = useState([]);
+    const [filteredTeams, setFilteredTeams] = useState([]);
+    const [search, setSearch] = useState('');
+    const [viewMode, setViewMode] = useState('cards'); // 'cards', 'comparison', 'matrix'
+    const [sortBy, setSortBy] = useState('team_abbr');
+    const [sortOrder, setSortOrder] = useState('asc');
+    const [selectedMetric, setSelectedMetric] = useState('offensive_ppg');
+    const [selectedTeams, setSelectedTeams] = useState([]);
+    const [matrixConfig, setMatrixConfig] = useState({  // Add matrix configuration state
+        xAxis: 'offensive_ppg',
+        yAxis: 'defensive_ppg',
+        zAxis: 'offense_epa_per_play'
+    });
+    const [isLoading, setIsLoading] = useState(true);   // Add loading state
+    const [loadError, setLoadError] = useState(null);   // Add error state
+    const navigate = useNavigate();
+
+    // Add refs for keyboard navigation
+    const viewModeButtonsRef = useRef(null);
+    
+    // State for first-time user tooltip
+    const [showHelperTooltip, setShowHelperTooltip] = useState(true);
+
+    // Add state for favorite teams
+    const [favoriteTeams, setFavoriteTeams] = useState(() => {
+        // Try to load from localStorage
+        try {
+            const saved = localStorage.getItem('favoriteTeams');
+            return saved ? JSON.parse(saved) : [];
+        } catch (err) {
+            console.error('Error loading favorite teams:', err);
+            return [];
+        }
+    });
+
+    // Define the available metrics for matrix dropdowns
+    const metricOptions = [
+        { value: 'offensive_ppg', label: 'Offensive PPG' },
+        { value: 'defensive_ppg', label: 'Defensive PPG' },
+        { value: 'offensive_ypg', label: 'Offensive YPG' },
+        { value: 'defensive_ypg', label: 'Defensive YPG' },
+        { value: 'offense_epa_per_play', label: 'Off EPA/Play' },
+        { value: 'defense_epa_per_play', label: 'Def EPA/Play' },
+        { value: 'offense_success_rate', label: 'Off Success Rate' },
+        { value: 'defense_success_rate', label: 'Def Success Rate' },
+        { value: 'offense_run_play_rate', label: 'Run Play Rate' },
+        { value: 'offense_pass_play_rate', label: 'Pass Play Rate' },
+        { value: 'offense_motion_rate', label: 'Motion Rate' },
+        { value: 'offense_pa_rate', label: 'Play Action Rate' }
+    ];
+
+    useEffect(() => {
+        setIsLoading(true);
+        setLoadError(null);
+        axios
+            .get('http://localhost:5000/api/teams')
+            .then(res => {
+                // Sort the teams by the selected criteria
+                const sortedTeams = sortTeams(res.data, sortBy, sortOrder);
+                setTeams(sortedTeams);
+                setFilteredTeams(sortedTeams);
+                setIsLoading(false);
+            })
+            .catch(err => {
+                console.error('❌ Failed to fetch teams:', err.message);
+                setLoadError('Failed to load team data. Please try again later.');
+                setIsLoading(false);
+            });
+    }, [sortBy, sortOrder]);
+
+    useEffect(() => {
+        const filtered = teams.filter(t =>
+                t.team_abbr.toLowerCase().includes(search.toLowerCase())
+        );
+        setFilteredTeams(filtered);
+    }, [search, teams]);
+
+    // Sort teams by specified field and order
+    const sortTeams = (teamList, field, order) => {
+        return [...teamList].sort((a, b) => {
+            let valA = a[field];
+            let valB = b[field];
+            
+            // Convert string numbers to actual numbers for comparison
+            if (!isNaN(parseFloat(valA))) valA = parseFloat(valA);
+            if (!isNaN(parseFloat(valB))) valB = parseFloat(valB);
+            
+            if (order === 'asc') {
+                return valA > valB ? 1 : -1;
+            } else {
+                return valA < valB ? 1 : -1;
+            }
+        });
+    };
+
+    // Toggle team selection for comparison
+    const toggleTeamSelection = (team) => {
+        if (selectedTeams.find(t => t.team_abbr === team.team_abbr)) {
+            setSelectedTeams(selectedTeams.filter(t => t.team_abbr !== team.team_abbr));
+        } else if (selectedTeams.length < 4) {
+            setSelectedTeams([...selectedTeams, team]);
+        }
+    };
+
+    // Handle sort change
+    const handleSortChange = (field) => {
+        if (sortBy === field) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortBy(field);
+            setSortOrder('desc'); // Default to descending for stats
+        }
+    };
+
+    // Get color for a specific team
+    const getTeamColor = (abbr) => TEAM_COLORS[abbr] || '#666666';
+    
+    // Generate comparison data for radar chart
+    const generateComparisonData = () => {
+        if (selectedTeams.length === 0) return [];
+        
+        // Key metrics for comparison
+        const metrics = [
+            { key: 'offensive_ppg', label: 'Off PPG' },
+            { key: 'defensive_ppg', label: 'Def PPG', invert: true },
+            { key: 'offense_success_rate', label: 'Off Success %' },
+            { key: 'defense_success_rate', label: 'Def Success %', invert: true },
+            { key: 'offense_epa_per_play', label: 'Off EPA/Play' },
+            { key: 'defense_epa_per_play', label: 'Def EPA/Play', invert: true }
+        ];
+        
+        return metrics.map(metric => {
+            const result = { metric: metric.label };
+            
+            // Get all values to normalize
+            const allValues = teams.map(t => parseFloat(t[metric.key]) || 0);
+            const maxVal = Math.max(...allValues);
+            const minVal = Math.min(...allValues);
+            
+            selectedTeams.forEach((team, idx) => {
+                let value = parseFloat(team[metric.key]) || 0;
+                
+                // Normalize to 0-100 scale
+                // For defensive stats, invert so lower is better
+                if (metric.invert) {
+                    result[`team${idx}`] = maxVal > minVal 
+                        ? 100 - ((value - minVal) / (maxVal - minVal) * 100) 
+                        : 50;
+                } else {
+                    result[`team${idx}`] = maxVal > minVal 
+                        ? ((value - minVal) / (maxVal - minVal) * 100) 
+                        : 50;
+                }
+                
+                result[`team${idx}Name`] = team.team_abbr;
+            });
+            
+            return result;
+        });
+    };
+    
+    // Updated getScatterData to use dynamic axes
+    const getScatterData = () => {
+        return filteredTeams.map(team => {
+            // Get the metric values based on current matrix configuration
+            const xValue = parseFloat(team[matrixConfig.xAxis]) || 0;
+            const yValue = parseFloat(team[matrixConfig.yAxis]) || 0;
+            // Scale EPA for bubble size or use another metric
+            const zValue = parseFloat(team[matrixConfig.zAxis]);
+            const zScale = matrixConfig.zAxis.includes('epa') ? zValue * 100 : zValue; // Scale EPA differently
+
+            return {
+                x: xValue,
+                y: yValue,
+                z: Math.max(zScale, 1) || 1, // Ensure minimum size
+                name: team.team_abbr,
+                team: team,
+            };
+        });
+    };
+
+    // Helper to get the display label for a metric
+    const getMetricLabel = (metricKey) => {
+        const metric = metricOptions.find(m => m.value === metricKey);
+        return metric ? metric.label : metricKey;
+    };
+
+    // Get league averages for metrics - useful for comparison
+    const getLeagueAverages = () => {
+        if (!teams.length) return {};
+        
+        const metrics = ['offensive_ppg', 'defensive_ppg', 'offensive_ypg', 'defensive_ypg',
+                        'offense_epa_per_play', 'defense_epa_per_play', 'offense_success_rate',
+                        'defense_success_rate', 'offense_run_play_rate', 'offense_pass_play_rate'];
+        
+        const averages = {};
+        metrics.forEach(metric => {
+            const values = teams.map(t => parseFloat(t[metric]) || 0);
+            averages[metric] = values.reduce((sum, val) => sum + val, 0) / values.length;
+        });
+        
+        return averages;
+    };
+
+    // Find which quadrant a team is in for the matrix view
+    const getQuadrantLabel = (xVal, yVal) => {
+        if (!teams.length) return "";
+        
+        // Get league averages for the selected metrics
+        const leagueAvgs = getLeagueAverages();
+        const xAvg = leagueAvgs[matrixConfig.xAxis] || 0;
+        const yAvg = leagueAvgs[matrixConfig.yAxis] || 0;
+        
+        // Check if y-axis is "better" when lower (like defensive stats)
+        const isYInverted = matrixConfig.yAxis.includes('defensive');
+        
+        if (xVal > xAvg) {
+            // Top quadrants - better than average on x-axis
+            if ((isYInverted && yVal < yAvg) || (!isYInverted && yVal > yAvg)) {
+                return "Elite";
+            } else {
+                return matrixConfig.xAxis.includes('offensive') ? "Offensive-Focused" : "Mixed Strengths";
+            }
+        } else {
+            // Bottom quadrants - worse than average on x-axis
+            if ((isYInverted && yVal < yAvg) || (!isYInverted && yVal > yAvg)) {
+                return matrixConfig.yAxis.includes('defensive') ? "Defensive-Focused" : "Mixed Weaknesses";
+            } else {
+                return "Below Average";
+            }
+        }
+    };
+
+    // New function for keyboard navigation
+    const handleKeyNavigation = (e, index, items, callback) => {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const nextIndex = (index + 1) % items.length;
+            callback(items[nextIndex]);
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prevIndex = (index - 1 + items.length) % items.length;
+            callback(items[prevIndex]);
+        }
+    };
+
+    // Save favorites to localStorage when they change
+    useEffect(() => {
+        try {
+            localStorage.setItem('favoriteTeams', JSON.stringify(favoriteTeams));
+        } catch (err) {
+            console.error('Error saving favorite teams:', err);
+        }
+    }, [favoriteTeams]);
+    
+    // Toggle team as favorite
+    const toggleFavorite = useCallback((team) => {
+        setFavoriteTeams(current => {
+            if (current.includes(team.team_abbr)) {
+                return current.filter(abbr => abbr !== team.team_abbr);
+            } else {
+                return [...current, team.team_abbr];
+            }
+        });
+    }, []);
+    
+    // Export current view as CSV
+    const exportToCSV = useCallback(() => {
+        // Determine which teams to export based on current view and filters
+        let teamsToExport = filteredTeams;
+        if (viewMode === 'comparison' && selectedTeams.length > 0) {
+            teamsToExport = selectedTeams;
+        }
+        
+        // Define which metrics to include in export
+        const metrics = [
+            { key: 'team_abbr', label: 'Team' },
+            { key: 'team_name', label: 'Name' },
+            { key: 'offensive_ppg', label: 'Off PPG' },
+            { key: 'defensive_ppg', label: 'Def PPG' },
+            { key: 'offensive_ypg', label: 'Off YPG' },
+            { key: 'defensive_ypg', label: 'Def YPG' },
+            { key: 'offense_epa_per_play', label: 'Off EPA/Play' },
+            { key: 'defense_epa_per_play', label: 'Def EPA/Play' },
+            { key: 'offense_success_rate', label: 'Off Success %' },
+            { key: 'defense_success_rate', label: 'Def Success %' },
+            { key: 'offense_run_play_rate', label: 'Run %' },
+            { key: 'offense_pass_play_rate', label: 'Pass %' }
+        ];
+        
+        // Create CSV header
+        let csv = metrics.map(m => m.label).join(',') + '\n';
+        
+        // Add each team's data
+        teamsToExport.forEach(team => {
+            csv += metrics.map(m => {
+                const value = team[m.key];
+                if (value === undefined || value === null) return '';
+                // Wrap in quotes if contains comma
+                return String(value).includes(',') ? `"${value}"` : value;
+            }).join(',') + '\n';
+        });
+        
+        // Create and download the file
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `nfl-teams-${viewMode}-export.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }, [filteredTeams, selectedTeams, viewMode]);
+
+    return (
+        <div className="p-6 max-w-7xl mx-auto">
+            <h1 className="text-3xl font-bold mb-2">NFL Team Overview</h1>
+            <p className="text-gray-400 mb-6">Data for 2023 Season</p>
+            
+            {/* First-time user helper tooltip */}
+            {showHelperTooltip && (
+                <div className="bg-blue-900 border border-blue-700 text-white p-4 rounded-lg mb-6 relative">
+                    <button 
+                        className="absolute top-2 right-2 text-sm"
+                        onClick={() => setShowHelperTooltip(false)}
+                        aria-label="Close tooltip"
+                    >
+                        ✕
+                    </button>
+                    <h2 className="font-bold mb-2">Welcome to Team Analysis</h2>
+                    <p className="mb-2">This dashboard allows you to analyze NFL teams in three different ways:</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                        <li><span className="font-semibold">Team Cards:</span> Quick overview of all teams</li>
+                        <li><span className="font-semibold">Team Comparison:</span> Select up to 4 teams to compare metrics</li>
+                        <li><span className="font-semibold">Team Matrix:</span> Visual plotting of teams by selected metrics</li>
+                    </ul>
+                </div>
+            )}
+            
+            {/* View selector and filters - with added export button */}
+            <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
+                <div 
+                    className="flex space-x-3" 
+                    role="tablist" 
+                    aria-label="View modes"
+                    ref={viewModeButtonsRef}
+                >
+                    <button 
+                        onClick={() => setViewMode('cards')}
+                        onKeyDown={(e) => handleKeyNavigation(e, 0, ['cards', 'comparison', 'matrix'], setViewMode)}
+                        className={`px-3 py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 ${viewMode === 'cards' ? 'bg-blue-600' : 'bg-gray-700'}`}
+                        role="tab"
+                        aria-selected={viewMode === 'cards'}
+                        aria-controls="team-cards-panel"
+                    >
+                        Team Cards
+                    </button>
+                    <button 
+                        onClick={() => setViewMode('comparison')}
+                        onKeyDown={(e) => handleKeyNavigation(e, 1, ['cards', 'comparison', 'matrix'], setViewMode)}
+                        className={`px-3 py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 ${viewMode === 'comparison' ? 'bg-blue-600' : 'bg-gray-700'}`}
+                        role="tab"
+                        aria-selected={viewMode === 'comparison'}
+                        aria-controls="team-comparison-panel"
+                    >
+                        Team Comparison ({selectedTeams.length}/4)
+                    </button>
+                    <button 
+                        onClick={() => setViewMode('matrix')}
+                        onKeyDown={(e) => handleKeyNavigation(e, 2, ['cards', 'comparison', 'matrix'], setViewMode)}
+                        className={`px-3 py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 ${viewMode === 'matrix' ? 'bg-blue-600' : 'bg-gray-700'}`}
+                        role="tab"
+                        aria-selected={viewMode === 'matrix'}
+                        aria-controls="team-matrix-panel"
+                    >
+                        Team Matrix
+                    </button>
+                </div>
+                
+                <div className="flex flex-wrap gap-2 items-center">
+                    {/* Add export and filter by favorites controls */}
+                    <div className="flex space-x-2 mr-2">
+                        <button
+                            onClick={exportToCSV}
+                            className="bg-green-700 hover:bg-green-600 text-white px-3 py-1 rounded text-sm flex items-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                            aria-label="Export data as CSV"
+                            title="Export as CSV"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Export
+                        </button>
+                        
+                        {favoriteTeams.length > 0 && (
+                            <button
+                                onClick={() => {
+                                    if (favoriteTeams.length > 0) {
+                                        // If already filtering by favorites, clear filter
+                                        if (search.includes('favorite:')) {
+                                            setSearch('');
+                                        } else {
+                                            setSearch('favorite:true');
+                                            // Filter teams to only show favorites
+                                            const filtered = teams.filter(t => 
+                                                favoriteTeams.includes(t.team_abbr)
+                                            );
+                                            setFilteredTeams(filtered);
+                                        }
+                                    }
+                                }}
+                                className={`px-3 py-1 rounded text-sm flex items-center focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
+                                    search.includes('favorite:') 
+                                        ? 'bg-yellow-600 text-white' 
+                                        : 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
+                                }`}
+                                aria-label={search.includes('favorite:') ? "Show all teams" : "Show only favorite teams"}
+                                title={search.includes('favorite:') ? "Show all teams" : "Show only favorite teams"}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill={search.includes('favorite:') ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                </svg>
+                                {search.includes('favorite:') ? "All Teams" : `Favorites (${favoriteTeams.length})`}
+                            </button>
+                        )}
+                    </div>
+                    
+                    {/* Rest of the input fields */}
+                    {viewMode === 'matrix' && (
+                        <select
+                            value={selectedMetric}
+                            onChange={(e) => setSelectedMetric(e.target.value)}
+                            className="p-1 bg-gray-800 text-white rounded"
+                            aria-label="Select metric for visualization"
+                        >
+                            <option value="offensive_ppg">Offensive PPG</option>
+                            <option value="defensive_ppg">Defensive PPG</option>
+                            <option value="offensive_ypg">Offensive YPG</option>
+                            <option value="defensive_ypg">Defensive YPG</option>
+                            <option value="offense_epa_per_play">Off EPA/Play</option>
+                            <option value="defense_epa_per_play">Def EPA/Play</option>
+                            <option value="offense_success_rate">Off Success Rate</option>
+                            <option value="defense_success_rate">Def Success Rate</option>
+                            <option value="offense_run_play_rate">Run Play Rate</option>
+                            <option value="offense_pass_play_rate">Pass Play Rate</option>
+                        </select>
+                    )}
+
+                    <input
+                        type="text"
+                        placeholder="Search by team name or abbreviation"
+                        className="p-2 w-64 text-black rounded shadow"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        aria-label="Search teams"
+                    />
+
+                    <div className="flex items-center">
+                        <label htmlFor="sort-select" className="sr-only">Sort teams by</label>
+                        <select
+                            id="sort-select"
+                            value={sortBy}
+                            onChange={(e) => handleSortChange(e.target.value)}
+                            className="p-1 bg-gray-800 text-white rounded"
+                            aria-label="Sort teams by metric"
+                        >
+                            <option value="team_abbr">Team Name</option>
+                            <option value="offensive_ppg">Off PPG</option>
+                            <option value="defensive_ppg">Def PPG</option>
+                            <option value="offense_epa_per_play">Off EPA/Play</option>
+                            <option value="defense_epa_per_play">Def EPA/Play</option>
+                            <option value="offense_success_rate">Success Rate</option>
+                        </select>
+                        
+                        <button
+                            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                            className="p-1 bg-gray-800 rounded ml-1 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                            aria-label={`Sort ${sortOrder === 'asc' ? 'ascending' : 'descending'}`}
+                        >
+                            {sortOrder === 'asc' ? '↑' : '↓'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            {/* Loading and Error states */}
+            {isLoading && (
+                <div className="bg-gray-800 p-6 rounded-lg mb-8 animate-pulse">
+                    <div className="h-8 bg-gray-700 rounded w-1/4 mb-4"></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {[...Array(8)].map((_, i) => (
+                            <div key={i} className="bg-gray-700 h-64 rounded-lg"></div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            
+            {loadError && (
+                <div className="bg-red-900 border border-red-700 text-white p-4 rounded-lg mb-8">
+                    <p className="font-bold">Error Loading Data</p>
+                    <p>{loadError}</p>
+                </div>
+            )}
+            
+            {!isLoading && !loadError && (
+                <>
+                    {/* Team Comparison View */}
+                    {viewMode === 'comparison' && (
+                        <div className="bg-gray-800 p-6 rounded-lg mb-8">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xl font-semibold">Team Comparison</h3>
+                                {selectedTeams.length > 0 && (
+                                    <button
+                                        onClick={() => setSelectedTeams([])}
+                                        className="text-sm bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded transition"
+                                    >
+                                        Clear Selection ({selectedTeams.length})
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {selectedTeams.length === 0 ? (
+                                <p className="text-gray-400">Select up to 4 teams to compare using the toggle button on team cards.</p>
+                            ) : (
+                                <>
+                                    <div className="flex mb-6 space-x-8 justify-center">
+                                        {selectedTeams.map((team, idx) => (
+                                            <div key={team.team_abbr} className="flex flex-col items-center">
+                                                <div 
+                                                    className="w-16 h-16 rounded-full mb-2 flex items-center justify-center"
+                                                    style={{ backgroundColor: getTeamColor(team.team_abbr) }}
+                                                >
+                                                    <span className="text-white font-bold text-lg">{team.team_abbr}</span>
+                                                </div>
+                            <button
+                                                    onClick={() => toggleTeamSelection(team)}
+                                                    className="text-xs text-red-400 mt-1"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    
+                                    {selectedTeams.length >= 2 && (
+                                        <>
+                                            {/* Radar Chart for Team Comparison */}
+                                            <div className="w-full h-96 mb-6">
+                                                <h4 className="text-lg font-medium mb-2">Performance Comparison</h4>
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <RadarChart outerRadius={150} data={generateComparisonData()}>
+                                                        <PolarGrid />
+                                                        <PolarAngleAxis dataKey="metric" tick={{ fill: 'white' }} />
+                                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'white' }} />
+                                                        
+                                                        {/* Reference circle at 50% for context */}
+                                                        <PolarRadiusAxis
+                                                            angle={30}
+                                                            domain={[0, 100]}
+                                                            axisLine={false}
+                                                            tick={false}
+                                                            tickCount={1}
+                                                            scale="linear"
+                                                        />
+                                                        
+                                                        {selectedTeams.map((team, idx) => (
+                                                            <Radar 
+                                                                key={team.team_abbr}
+                                                                name={team.team_abbr} 
+                                                                dataKey={`team${idx}`} 
+                                                                stroke={getTeamColor(team.team_abbr)} 
+                                                                fill={getTeamColor(team.team_abbr)} 
+                                                                fillOpacity={0.5} 
+                                                            />
+                                                        ))}
+                                                        
+                                                        <Legend formatter={(value) => {
+                                                            const team = selectedTeams.find(t => t.team_abbr === value);
+                                                            return team ? `${team.team_abbr} (${team.team_name || ''})` : value;
+                                                        }} />
+                                                        <RechartsTooltip 
+                                                            content={({ active, payload }) => {
+                                                                if (active && payload && payload.length) {
+                                                                    const metric = payload[0].payload.metric;
+                                                                    return (
+                                                                        <div className="bg-gray-900 p-3 border border-gray-700 rounded">
+                                                                            <p className="font-bold text-white mb-2">{metric}</p>
+                                                                            {payload.map((entry, index) => {
+                                                                                const teamIdx = parseInt(entry.dataKey.replace('team', ''), 10);
+                                                                                const team = selectedTeams[teamIdx];
+                                                                                return (
+                                                                                    <div key={index} className="flex items-center mb-1">
+                                                                                        <div 
+                                                                                            className="w-3 h-3 mr-2 rounded-full" 
+                                                                                            style={{ backgroundColor: getTeamColor(team.team_abbr) }}
+                                                                                        />
+                                                                                        <span className="text-gray-300">
+                                                                                            {team.team_abbr}: {entry.value.toFixed(1)}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            }}
+                                                        />
+                                                    </RadarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                            
+                                            {/* Bar Charts for Key Metrics - With Reference Lines */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                                <div className="bg-gray-900 p-4 rounded">
+                                                    <h4 className="text-lg font-medium mb-2">Offensive PPG</h4>
+                                                    <ResponsiveContainer width="100%" height={300}>
+                                                        <BarChart 
+                                                            data={selectedTeams.map(team => ({
+                                                                name: team.team_abbr,
+                                                                value: parseFloat(team.offensive_ppg)
+                                                            }))}
+                                                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                                                        >
+                                                            <XAxis dataKey="name" tick={{ fill: 'white' }} />
+                                                            <YAxis tick={{ fill: 'white' }} />
+                                                            
+                                                            {/* Add league average reference line */}
+                                                            <ReferenceLine 
+                                                                y={getLeagueAverages().offensive_ppg} 
+                                                                stroke="#fff" 
+                                                                strokeDasharray="3 3"
+                                                                label={{ 
+                                                                    value: 'League Avg', 
+                                                                    fill: 'white',
+                                                                    fontSize: 12,
+                                                                    position: 'insideBottomRight'
+                                                                }}
+                                                            />
+                                                            
+                                                            <RechartsTooltip 
+                                                                content={({ active, payload }) => {
+                                                                    if (active && payload && payload.length) {
+                                                                        const data = payload[0].payload;
+                                                                        const teamObj = selectedTeams.find(t => t.team_abbr === data.name);
+                                                                        const leagueAvg = getLeagueAverages().offensive_ppg;
+                                                                        const percentile = calculatePercentile(
+                                                                            data.value,
+                                                                            teams.map(t => parseFloat(t.offensive_ppg) || 0)
+                                                                        );
+                                                                        
+                                                                        return (
+                                                                            <div className="bg-gray-900 p-3 border border-gray-700 rounded">
+                                                                                <p className="font-bold text-white mb-1">{data.name} Offensive PPG</p>
+                                                                                <p className="text-lg text-white">{data.value.toFixed(1)}</p>
+                                                                                <div className="text-sm mt-2 text-gray-300">
+                                                                                    <p>League Avg: {leagueAvg.toFixed(1)}</p>
+                                                                                    <p>Percentile: {percentile}%</p>
+                                                                                    <p className={data.value > leagueAvg ? 'text-green-400' : 'text-red-400'}>
+                                                                                        {data.value > leagueAvg 
+                                                                                            ? `+${(data.value - leagueAvg).toFixed(1)} vs. League Avg` 
+                                                                                            : `${(data.value - leagueAvg).toFixed(1)} vs. League Avg`}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                }}
+                                                            />
+                                                            
+                                                            <Bar dataKey="value">
+                                                                {selectedTeams.map((team) => (
+                                                                    <Cell key={team.team_abbr} fill={getTeamColor(team.team_abbr)} />
+                                                                ))}
+                                                            </Bar>
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                                
+                                                <div className="bg-gray-900 p-4 rounded">
+                                                    <h4 className="text-lg font-medium mb-2">Defensive PPG</h4>
+                                                    <ResponsiveContainer width="100%" height={300}>
+                                                        <BarChart 
+                                                            data={selectedTeams.map(team => ({
+                                                                name: team.team_abbr,
+                                                                value: parseFloat(team.defensive_ppg)
+                                                            }))}
+                                                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                                                        >
+                                                            <XAxis dataKey="name" tick={{ fill: 'white' }} />
+                                                            <YAxis tick={{ fill: 'white' }} />
+                                                            
+                                                            {/* Add league average reference line */}
+                                                            <ReferenceLine 
+                                                                y={getLeagueAverages().defensive_ppg} 
+                                                                stroke="#fff" 
+                                                                strokeDasharray="3 3"
+                                                                label={{ 
+                                                                    value: 'League Avg', 
+                                                                    fill: 'white',
+                                                                    fontSize: 12,
+                                                                    position: 'insideBottomRight'
+                                                                }}
+                                                            />
+                                                            
+                                                            <RechartsTooltip 
+                                                                content={({ active, payload }) => {
+                                                                    if (active && payload && payload.length) {
+                                                                        const data = payload[0].payload;
+                                                                        const teamObj = selectedTeams.find(t => t.team_abbr === data.name);
+                                                                        const leagueAvg = getLeagueAverages().defensive_ppg;
+                                                                        const percentile = calculatePercentile(
+                                                                            data.value,
+                                                                            teams.map(t => parseFloat(t.defensive_ppg) || 0)
+                                                                        );
+                                                                        // For defensive stats, lower is better
+                                                                        const isBetter = data.value < leagueAvg;
+                                                                        
+                                                                        return (
+                                                                            <div className="bg-gray-900 p-3 border border-gray-700 rounded">
+                                                                                <p className="font-bold text-white mb-1">{data.name} Defensive PPG</p>
+                                                                                <p className="text-lg text-white">{data.value.toFixed(1)}</p>
+                                                                                <div className="text-sm mt-2 text-gray-300">
+                                                                                    <p>League Avg: {leagueAvg.toFixed(1)}</p>
+                                                                                    <p>Percentile: {100 - percentile}%</p> {/* Invert for defensive stats */}
+                                                                                    <p className={isBetter ? 'text-green-400' : 'text-red-400'}>
+                                                                                        {isBetter
+                                                                                            ? `${(leagueAvg - data.value).toFixed(1)} better than League Avg` 
+                                                                                            : `${(data.value - leagueAvg).toFixed(1)} worse than League Avg`}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                }}
+                                                            />
+                                                            
+                                                            <Bar dataKey="value">
+                                                                {selectedTeams.map((team) => (
+                                                                    <Cell key={team.team_abbr} fill={getTeamColor(team.team_abbr)} />
+                                                                ))}
+                                                            </Bar>
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                    
+                                    {/* Enhanced Detailed Stats Table with League Context */}
+                                    <div className="overflow-x-auto">
+                                        <h4 className="text-lg font-medium mb-3">Detailed Team Metrics</h4>
+                                        
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="text-xs text-gray-400 uppercase bg-gray-700">
+                                                <tr>
+                                                    <th className="px-4 py-2">Metric</th>
+                                                    {selectedTeams.map(team => (
+                                                        <th key={team.team_abbr} className="px-4 py-2">{team.team_abbr}</th>
+                                                    ))}
+                                                    <th className="px-4 py-2 text-blue-300">League Avg</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {[
+                                                    { key: 'offensive_ppg', label: 'Offensive PPG', isDefensive: false, precision: 1 },
+                                                    { key: 'defensive_ppg', label: 'Defensive PPG', isDefensive: true, precision: 1 },
+                                                    { key: 'offensive_ypg', label: 'Off Yards/Game', isDefensive: false, precision: 1 },
+                                                    { key: 'defensive_ypg', label: 'Def Yards/Game', isDefensive: true, precision: 1 },
+                                                    { key: 'offense_epa_per_play', label: 'Off EPA/Play', isDefensive: false, precision: 3 },
+                                                    { key: 'defense_epa_per_play', label: 'Def EPA/Play', isDefensive: true, precision: 3 },
+                                                    { key: 'offense_success_rate', label: 'Off Success %', isDefensive: false, precision: 1 },
+                                                    { key: 'defense_success_rate', label: 'Def Success %', isDefensive: true, precision: 1 },
+                                                    { key: 'offense_run_play_rate', label: 'Run Rate %', isDefensive: false, precision: 1 },
+                                                    { key: 'offense_pass_play_rate', label: 'Pass Rate %', isDefensive: false, precision: 1 },
+                                                    { key: 'offense_motion_rate', label: 'Motion Rate %', isDefensive: false, precision: 1 },
+                                                    { key: 'offense_pa_rate', label: 'Play Action %', isDefensive: false, precision: 1 },
+                                                    { key: 'offense_no_huddle_rate', label: 'No Huddle %', isDefensive: false, precision: 1 },
+                                                    { key: 'defense_blitz_rate', label: 'Blitz Rate %', isDefensive: false, precision: 1 }
+                                                ].map(metric => {
+                                                    // Get league average for this metric
+                                                    const leagueAvg = getLeagueAverages()[metric.key] || 0;
+                                                    
+                                                    // For each team, determine if they're above or below average
+                                                    const teamValues = selectedTeams.map(team => ({
+                                                        team,
+                                                        value: parseFloat(team[metric.key]) || 0,
+                                                        // Calculate if this is better than league average
+                                                        // For defensive stats, lower is better
+                                                        isBetter: metric.isDefensive 
+                                                            ? (parseFloat(team[metric.key]) || 0) < leagueAvg
+                                                            : (parseFloat(team[metric.key]) || 0) > leagueAvg,
+                                                        // Get percentile rank among all teams
+                                                        percentile: calculatePercentile(
+                                                            parseFloat(team[metric.key]) || 0,
+                                                            teams.map(t => parseFloat(t[metric.key]) || 0)
+                                                        )
+                                                    }));
+                                                    
+                                                    return (
+                                                        <tr key={metric.key} className="border-b border-gray-700 hover:bg-gray-750">
+                                                            <td className="px-4 py-2 font-medium text-gray-300">{metric.label}</td>
+                                                            
+                                                            {/* Team values with color-coding for above/below average */}
+                                                            {teamValues.map(({ team, value, isBetter, percentile }) => (
+                                                                <td 
+                                                                    key={team.team_abbr} 
+                                                                    className={`px-4 py-2 ${
+                                                                        isBetter ? 'text-green-400' : 'text-red-400'
+                                                                    }`} 
+                                                                    title={`${percentile}th percentile in NFL`}
+                                                                >
+                                                                    <div className="flex items-center">
+                                                                        <span className="mr-2">{value.toFixed(metric.precision)}</span>
+                                                                        <div className="w-8 bg-gray-700 h-1 rounded-full overflow-hidden">
+                                                                            <div 
+                                                                                className={`h-full ${isBetter ? 'bg-green-500' : 'bg-red-500'}`}
+                                                                                style={{ width: `${percentile}%` }}
+                                                                            ></div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            ))}
+                                                            
+                                                            {/* League average column */}
+                                                            <td className="px-4 py-2 text-blue-300 font-medium">
+                                                                {leagueAvg.toFixed(metric.precision)}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                        <div className="text-xs text-gray-400 mt-2">
+                                            * Values in <span className="text-green-400">green</span> are better than league average, <span className="text-red-400">red</span> are worse. 
+                                            The bar represents team percentile rank in NFL.
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
+                    
+                    {/* Matrix View - Enhanced with axis selection */}
+                    {viewMode === 'matrix' && (
+                        <div className="bg-gray-800 p-6 rounded-lg mb-8">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+                                <h3 className="text-xl font-semibold mb-4 md:mb-0">Team Performance Matrix</h3>
+                                
+                                {/* Axis selection controls */}
+                                <div className="flex flex-wrap gap-3 md:gap-4">
+                                    <div className="flex flex-col">
+                                        <label className="text-xs text-gray-400 mb-1" id="x-axis-label">X-Axis</label>
+                                        <select
+                                            aria-labelledby="x-axis-label"
+                                            value={matrixConfig.xAxis}
+                                            onChange={(e) => setMatrixConfig({...matrixConfig, xAxis: e.target.value})}
+                                            className="p-1 bg-gray-800 border border-gray-700 text-white rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                        >
+                                            {metricOptions.map(option => (
+                                                <option key={`x-${option.value}`} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    
+                                    <div className="flex flex-col">
+                                        <label className="text-xs text-gray-400 mb-1" id="y-axis-label">Y-Axis</label>
+                                        <select
+                                            aria-labelledby="y-axis-label"
+                                            value={matrixConfig.yAxis}
+                                            onChange={(e) => setMatrixConfig({...matrixConfig, yAxis: e.target.value})}
+                                            className="p-1 bg-gray-800 border border-gray-700 text-white rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                        >
+                                            {metricOptions.map(option => (
+                                                <option key={`y-${option.value}`} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    
+                                    <div className="flex flex-col">
+                                        <label className="text-xs text-gray-400 mb-1" id="bubble-size-label">Bubble Size</label>
+                                        <select
+                                            aria-labelledby="bubble-size-label"
+                                            value={matrixConfig.zAxis}
+                                            onChange={(e) => setMatrixConfig({...matrixConfig, zAxis: e.target.value})}
+                                            className="p-1 bg-gray-800 border border-gray-700 text-white rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                        >
+                                            {metricOptions.map(option => (
+                                                <option key={`z-${option.value}`} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="w-full h-[600px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <ScatterChart
+                                        margin={{ top: 20, right: 20, bottom: 60, left: 40 }}
+                                    >
+                                        <XAxis 
+                                            type="number" 
+                                            dataKey="x" 
+                                            name={getMetricLabel(matrixConfig.xAxis)}
+                                            tick={{ fill: 'white' }}
+                                            label={{ 
+                                                value: getMetricLabel(matrixConfig.xAxis), 
+                                                position: 'bottom', 
+                                                fill: 'white',
+                                                offset: 0
+                                            }} 
+                                        />
+                                        <YAxis 
+                                            type="number" 
+                                            dataKey="y" 
+                                            name={getMetricLabel(matrixConfig.yAxis)} 
+                                            tick={{ fill: 'white' }}
+                                            label={{ 
+                                                value: `${getMetricLabel(matrixConfig.yAxis)}${matrixConfig.yAxis.includes('defensive') ? ' (lower is better)' : ''}`, 
+                                                angle: -90, 
+                                                position: 'left', 
+                                                fill: 'white' 
+                                            }} 
+                                        />
+                                        <ZAxis 
+                                            type="number" 
+                                            dataKey="z" 
+                                            range={[40, 400]} 
+                                            name={getMetricLabel(matrixConfig.zAxis)} 
+                                        />
+                                        
+                                        {/* League average reference lines */}
+                                        {teams.length > 0 && (
+                                            <>
+                                                <ReferenceLine 
+                                                    x={getLeagueAverages()[matrixConfig.xAxis] || 0} 
+                                                    stroke="#ffffff" 
+                                                    strokeDasharray="3 3"
+                                                    label={{ 
+                                                        value: "League Avg", 
+                                                        position: "insideBottomLeft",
+                                                        fill: "#ffffff",
+                                                        fontSize: 12
+                                                    }} 
+                                                />
+                                                
+                                                <ReferenceLine 
+                                                    y={getLeagueAverages()[matrixConfig.yAxis] || 0} 
+                                                    stroke="#ffffff" 
+                                                    strokeDasharray="3 3"
+                                                    label={{ 
+                                                        value: "League Avg", 
+                                                        position: "insideLeft",
+                                                        fill: "#ffffff",
+                                                        fontSize: 12,
+                                                        angle: -90
+                                                    }} 
+                                                />
+                                                
+                                                {/* Quadrant labels */}
+                                                <text
+                                                    x={getLeagueAverages()[matrixConfig.xAxis] * 1.1 || 0} 
+                                                    y={(getLeagueAverages()[matrixConfig.yAxis] * (matrixConfig.yAxis.includes('defensive') ? 0.9 : 1.1)) || 0}
+                                                    fill="#84cc16"
+                                                    fontSize={14}
+                                                    textAnchor="middle"
+                                                    fontWeight="bold"
+                                                >
+                                                    Elite
+                                                </text>
+                                                
+                                                <text
+                                                    x={getLeagueAverages()[matrixConfig.xAxis] * 0.9 || 0} 
+                                                    y={(getLeagueAverages()[matrixConfig.yAxis] * (matrixConfig.yAxis.includes('defensive') ? 0.9 : 1.1)) || 0}
+                                                    fill="#3b82f6"
+                                                    fontSize={14}
+                                                    textAnchor="middle"
+                                                    fontWeight="bold"
+                                                >
+                                                    {matrixConfig.yAxis.includes('defensive') ? "Defensive-Focused" : "Mixed Strengths"}
+                                                </text>
+                                                
+                                                <text
+                                                    x={getLeagueAverages()[matrixConfig.xAxis] * 1.1 || 0} 
+                                                    y={(getLeagueAverages()[matrixConfig.yAxis] * (matrixConfig.yAxis.includes('defensive') ? 1.1 : 0.9)) || 0}
+                                                    fill="#f59e0b"
+                                                    fontSize={14}
+                                                    textAnchor="middle"
+                                                    fontWeight="bold"
+                                                >
+                                                    {matrixConfig.xAxis.includes('offensive') ? "Offensive-Focused" : "Mixed Weaknesses"}
+                                                </text>
+                                                
+                                                <text
+                                                    x={getLeagueAverages()[matrixConfig.xAxis] * 0.9 || 0} 
+                                                    y={(getLeagueAverages()[matrixConfig.yAxis] * (matrixConfig.yAxis.includes('defensive') ? 1.1 : 0.9)) || 0}
+                                                    fill="#ef4444"
+                                                    fontSize={14}
+                                                    textAnchor="middle"
+                                                    fontWeight="bold"
+                                                >
+                                                    Below Average
+                                                </text>
+                                            </>
+                                        )}
+                                        
+                                        <RechartsTooltip 
+                                            cursor={{ strokeDasharray: '3 3' }}
+                                            content={({ active, payload }) => {
+                                                if (active && payload && payload.length) {
+                                                    const data = payload[0].payload;
+                                                    const teamColor = getTeamColor(data.name);
+                                                    const leagueAvgs = getLeagueAverages();
+                                                    const xAvg = leagueAvgs[matrixConfig.xAxis] || 0;
+                                                    const yAvg = leagueAvgs[matrixConfig.yAxis] || 0;
+                                                    
+                                                    // Determine if value is better than average
+                                                    const isXBetter = data.x > xAvg;
+                                                    const isYBetter = matrixConfig.yAxis.includes('defensive') 
+                                                        ? data.y < yAvg 
+                                                        : data.y > yAvg;
+                                                    
+                                                    return (
+                                                        <div className="bg-gray-900 p-3 border border-gray-700 rounded max-w-xs">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div 
+                                                                    className="w-4 h-4 rounded-full" 
+                                                                    style={{ backgroundColor: teamColor }}
+                                                                ></div>
+                                                                <p className="font-bold">{data.team.team_name || data.name}</p>
+                                                            </div>
+                                                            
+                                                            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm mb-2">
+                                                                <span className="text-gray-400">{getMetricLabel(matrixConfig.xAxis)}:</span>
+                                                                <span className={isXBetter ? "text-green-400" : "text-red-400"}>
+                                                                    {matrixConfig.xAxis.includes('epa') ? data.x.toFixed(3) : data.x.toFixed(1)}
+                                                                    {isXBetter ? " ↑" : " ↓"}
+                                                                </span>
+                                                                
+                                                                <span className="text-gray-400">{getMetricLabel(matrixConfig.yAxis)}:</span>
+                                                                <span className={isYBetter ? "text-green-400" : "text-red-400"}>
+                                                                    {matrixConfig.yAxis.includes('epa') ? data.y.toFixed(3) : data.y.toFixed(1)}
+                                                                    {isYBetter ? " ↑" : " ↓"}
+                                                                </span>
+                                                                
+                                                                <span className="text-gray-400">{getMetricLabel(matrixConfig.zAxis)}:</span>
+                                                                <span>{matrixConfig.zAxis.includes('epa') ? (data.z/100).toFixed(3) : data.z.toFixed(1)}</span>
+                                                            </div>
+                                                            
+                                                            <div className="mt-2 pt-2 border-t border-gray-700">
+                                                                <span className="font-medium">Quadrant: </span>
+                                                                <span className="font-bold" style={{ color: 
+                                                                    getQuadrantLabel(data.x, data.y) === "Elite" ? "#84cc16" :
+                                                                    getQuadrantLabel(data.x, data.y) === "Below Average" ? "#ef4444" :
+                                                                    getQuadrantLabel(data.x, data.y).includes("Offensive") ? "#f59e0b" : "#3b82f6"
+                                                                }}>
+                                                                    {getQuadrantLabel(data.x, data.y)}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            }}
+                                        />
+                                        <Scatter 
+                                            name="Teams" 
+                                            data={getScatterData()} 
+                                            fill="#8884d8"
+                                        >
+                                            {getScatterData().map((entry) => (
+                                                <Cell
+                                                    key={entry.name}
+                                                    fill={getTeamColor(entry.name)}
+                                                    stroke="#fff"
+                                                    strokeWidth={
+                                                        selectedTeams.some(t => t.team_abbr === entry.name) ? 2 : 0
+                                                    }
+                                                />
+                                            ))}
+                                        </Scatter>
+                                    </ScatterChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="text-center text-sm text-gray-400 mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <p className="font-medium mb-1">Bubble size represents:</p>
+                                    <p>{getMetricLabel(matrixConfig.zAxis)} {!matrixConfig.zAxis.includes('defensive') ? "(bigger = better)" : "(smaller = better)"}</p>
+                                </div>
+                                <div>
+                                    <p className="font-medium mb-1">Reference lines:</p>
+                                    <p>White dashed lines show league average values</p>
+                                </div>
+                                <div>
+                                    <p className="font-medium mb-1">Selected teams:</p>
+                                    <p>Teams with white borders are included in comparison view</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Team Cards View - ENHANCED */}
+                    {viewMode === 'cards' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" role="list" aria-label="NFL Teams">
+                            {filteredTeams.map(team => {
+                                const isSelected = selectedTeams.some(t => t.team_abbr === team.team_abbr);
+                                const isFavorite = favoriteTeams.includes(team.team_abbr);
+                                const teamColor = getTeamColor(team.team_abbr);
+                                const logoUrl = getTeamLogo(team);
+                                
+                                // Calculate percentiles for key metrics
+                                const offPPGPercentile = calculatePercentile(
+                                    parseFloat(team.offensive_ppg) || 0,
+                                    teams.map(t => parseFloat(t.offensive_ppg) || 0)
+                                );
+                                
+                                const defPPGPercentile = 100 - calculatePercentile(
+                                    parseFloat(team.defensive_ppg) || 0,
+                                    teams.map(t => parseFloat(t.defensive_ppg) || 0)
+                                ); // Invert for defensive stats (lower is better)
+                                
+                                // Get league average to compare
+                                const leagueAvgs = getLeagueAverages();
+                                
+                                // Get team classification based on quadrants
+                                let teamClassification = "";
+                                if (
+                                    parseFloat(team.offensive_ppg) > leagueAvgs.offensive_ppg && 
+                                    parseFloat(team.defensive_ppg) < leagueAvgs.defensive_ppg
+                                ) {
+                                    teamClassification = "Elite";
+                                } else if (
+                                    parseFloat(team.offensive_ppg) > leagueAvgs.offensive_ppg && 
+                                    parseFloat(team.defensive_ppg) >= leagueAvgs.defensive_ppg
+                                ) {
+                                    teamClassification = "Offensive-Focused";
+                                } else if (
+                                    parseFloat(team.offensive_ppg) <= leagueAvgs.offensive_ppg && 
+                                    parseFloat(team.defensive_ppg) < leagueAvgs.defensive_ppg
+                                ) {
+                                    teamClassification = "Defensive-Focused";
+                                } else {
+                                    teamClassification = "Rebuilding";
+                                }
+                                
+                                return (
+                                    <div
+                                        key={team.team_abbr}
+                                        className={`team-card bg-gray-800 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 flex flex-col overflow-hidden border-2 ${isSelected ? 'border-blue-500' : isFavorite ? 'border-yellow-500' : 'border-transparent'}`}
+                                        role="listitem"
+                                        aria-label={`${team.team_name || team.team_abbr} team card`}
+                                    >
+                                        {/* Header with Logo and Name */}
+                                        <div 
+                                            className="p-4 flex items-center space-x-4 relative" 
+                                            style={{ 
+                                                background: `linear-gradient(to right, ${teamColor}22, ${teamColor}44)`,
+                                                borderTop: `4px solid ${teamColor}` 
+                                            }}
+                                        >
+                                            <img 
+                                                src={logoUrl}
+                                                alt={`${team.team_name || team.team_abbr} logo`}
+                                                className="w-16 h-16 object-contain flex-shrink-0"
+                                                onError={(e) => { e.target.src = 'https://via.placeholder.com/100?text=N/A'; }}
+                                            />
+                                            <div className="flex-grow overflow-hidden">
+                                                <div className="flex items-center gap-1">
+                                                    <h3 className="text-xl font-bold truncate" title={team.team_name || team.team_abbr}>
+                                                        {team.team_name || team.team_abbr}
+                                                    </h3>
+                                                    {/* Favorite star button */}
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            toggleFavorite(team);
+                                                        }}
+                                                        className={`ml-1 p-1 rounded-full transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
+                                                            isFavorite ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'
+                                                        }`}
+                                                        title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                                                        aria-label={isFavorite ? `Remove ${team.team_abbr} from favorites` : `Add ${team.team_abbr} to favorites`}
+                                                        aria-pressed={isFavorite}
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill={isFavorite ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center">
+                                                    <p className="text-sm text-gray-400 mr-2">{team.team_abbr}</p>
+                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                        teamClassification === "Elite" ? "bg-green-900 text-green-300" :
+                                                        teamClassification === "Offensive-Focused" ? "bg-yellow-900 text-yellow-300" :
+                                                        teamClassification === "Defensive-Focused" ? "bg-blue-900 text-blue-300" :
+                                                        "bg-red-900 text-red-300"
+                                                    }`}>
+                                                        {teamClassification}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {/* Comparison Toggle with better accessibility */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleTeamSelection(team);
+                                                }}
+                                                className={`p-2 rounded-full transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 ${
+                                                    isSelected ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+                                                }`}
+                                                title={isSelected ? "Remove from comparison" : "Add to comparison"}
+                                                aria-label={isSelected ? `Remove ${team.team_abbr} from comparison` : `Add ${team.team_abbr} to comparison`}
+                                                aria-pressed={isSelected}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    {isSelected ? (
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    ) : (
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                                    )}
+                                                </svg>
+                                            </button>
+                                        </div>
+
+                                        {/* Body with enhanced stats presentation */}
+                                        <div className="p-4 bg-gray-850 flex-grow"> 
+                                            {/* Key Stats with Percentile Bars */}
+                                            <div className="grid grid-cols-2 gap-4 mb-4 mt-2">
+                                                <div className="bg-gray-750 p-2 rounded">
+                                                    <p className="text-xs text-gray-400 uppercase text-center">Off PPG</p>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className={`text-lg font-semibold ${
+                                                            parseFloat(team.offensive_ppg) > leagueAvgs.offensive_ppg 
+                                                                ? 'text-green-400' 
+                                                                : 'text-red-400'
+                                                        }`}>
+                                                            {team.offensive_ppg || 'N/A'}
+                                                        </span>
+                                                        <div className="w-10 h-10 relative flex items-center justify-center">
+                                                            <svg viewBox="0 0 36 36" className="w-full h-full">
+                                                                <path 
+                                                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                    fill="none"
+                                                                    stroke="#444"
+                                                                    strokeWidth="3"
+                                                                    strokeDasharray="100, 100"
+                                                                />
+                                                                <path 
+                                                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                    fill="none"
+                                                                    stroke={parseFloat(team.offensive_ppg) > leagueAvgs.offensive_ppg ? "#4ade80" : "#f87171"}
+                                                                    strokeWidth="3"
+                                                                    strokeDasharray={`${offPPGPercentile}, 100`}
+                                                                />
+                                                                <text 
+                                                                    x="18" 
+                                                                    y="20.5" 
+                                                                    textAnchor="middle" 
+                                                                    fill="white" 
+                                                                    fontSize="9.5px"
+                                                                    fontWeight="bold"
+                                                                >
+                                                                    {offPPGPercentile}%
+                                                                </text>
+                                                            </svg>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gray-750 p-2 rounded">
+                                                    <p className="text-xs text-gray-400 uppercase text-center">Def PPG</p>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className={`text-lg font-semibold ${
+                                                            parseFloat(team.defensive_ppg) < leagueAvgs.defensive_ppg 
+                                                                ? 'text-green-400' 
+                                                                : 'text-red-400'
+                                                        }`}>
+                                                            {team.defensive_ppg || 'N/A'}
+                                                        </span>
+                                                        <div className="w-10 h-10 relative flex items-center justify-center">
+                                                            <svg viewBox="0 0 36 36" className="w-full h-full">
+                                                                <path 
+                                                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                    fill="none"
+                                                                    stroke="#444"
+                                                                    strokeWidth="3"
+                                                                    strokeDasharray="100, 100"
+                                                                />
+                                                                <path 
+                                                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                    fill="none"
+                                                                    stroke={parseFloat(team.defensive_ppg) < leagueAvgs.defensive_ppg ? "#4ade80" : "#f87171"}
+                                                                    strokeWidth="3"
+                                                                    strokeDasharray={`${defPPGPercentile}, 100`}
+                                                                />
+                                                                <text 
+                                                                    x="18" 
+                                                                    y="20.5" 
+                                                                    textAnchor="middle" 
+                                                                    fill="white" 
+                                                                    fontSize="9.5px"
+                                                                    fontWeight="bold"
+                                                                >
+                                                                    {defPPGPercentile}%
+                                                                </text>
+                                                            </svg>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gray-750 p-2 rounded">
+                                                    <p className="text-xs text-gray-400 uppercase text-center">Off Success %</p>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className={`text-lg font-semibold ${
+                                                            parseFloat(team.offense_success_rate) > leagueAvgs.offense_success_rate 
+                                                                ? 'text-green-400' 
+                                                                : 'text-red-400'
+                                                        }`}>
+                                                            {team.offense_success_rate || 'N/A'}
+                                                        </span>
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                            parseFloat(team.offense_success_rate) > leagueAvgs.offense_success_rate 
+                                                                ? 'bg-green-900 text-green-300' 
+                                                                : 'bg-red-900 text-red-300'
+                                                        }`}>
+                                                            {parseFloat(team.offense_success_rate) > leagueAvgs.offense_success_rate 
+                                                                ? `+${(parseFloat(team.offense_success_rate) - leagueAvgs.offense_success_rate).toFixed(1)}` 
+                                                                : (parseFloat(team.offense_success_rate) - leagueAvgs.offense_success_rate).toFixed(1)
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gray-750 p-2 rounded">
+                                                    <p className="text-xs text-gray-400 uppercase text-center">Def Success %</p>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className={`text-lg font-semibold ${
+                                                            parseFloat(team.defense_success_rate) < leagueAvgs.defense_success_rate 
+                                                                ? 'text-green-400' 
+                                                                : 'text-red-400'
+                                                        }`}>
+                                                            {team.defense_success_rate || 'N/A'}
+                                                        </span>
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                            parseFloat(team.defense_success_rate) < leagueAvgs.defense_success_rate 
+                                                                ? 'bg-green-900 text-green-300' 
+                                                                : 'bg-red-900 text-red-300'
+                                                        }`}>
+                                                            {parseFloat(team.defense_success_rate) < leagueAvgs.defense_success_rate 
+                                                                ? `${(parseFloat(team.defense_success_rate) - leagueAvgs.defense_success_rate).toFixed(1)}` 
+                                                                : `+${(parseFloat(team.defense_success_rate) - leagueAvgs.defense_success_rate).toFixed(1)}`
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Playcalling - Enhanced */}
+                                            <div className="text-center mb-4">
+                                                <h4 className="text-sm font-medium mb-1 text-gray-300">Playcalling Tendency</h4>
+                                                <div className="flex h-3 w-full rounded-full overflow-hidden bg-gray-700">
+                                                    <div 
+                                                        className="bg-blue-500 h-full flex items-center justify-center transition-all duration-300" 
+                                                        style={{ width: `${team.offense_pass_play_rate}%` }}
+                                                    >
+                                                        {parseInt(team.offense_pass_play_rate) > 25 && (
+                                                            <span className="text-white text-xs px-1 truncate">Pass</span>
+                                                        )}
+                                                    </div>
+                                                    <div 
+                                                        className="bg-green-500 h-full flex items-center justify-center transition-all duration-300" 
+                                                        style={{ width: `${team.offense_run_play_rate}%` }}
+                                                    >
+                                                        {parseInt(team.offense_run_play_rate) > 25 && (
+                                                            <span className="text-white text-xs px-1 truncate">Run</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                                    <span>Pass {team.offense_pass_play_rate}%</span>
+                                                    <span>Run {team.offense_run_play_rate}%</span>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Advanced Stats Preview */}
+                                            <div className="flex justify-between text-xs mt-2 text-gray-400">
+                                                <div>
+                                                    <p>Motion Rate: {team.offense_motion_rate || 'N/A'}%</p>
+                                                    <p>Play Action: {team.offense_pa_rate || 'N/A'}%</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p>Off EPA: {team.offense_epa_per_play != null ? parseFloat(team.offense_epa_per_play).toFixed(2) : 'N/A'}</p>
+                                                    <p>Def EPA: {team.defense_epa_per_play != null ? parseFloat(team.defense_epa_per_play).toFixed(2) : 'N/A'}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Footer with Links - improved accessibility */}
+                                        <div className="p-4 bg-gray-900 flex justify-around">
+                                            <button
+                                                onClick={() => navigate(`/team/${team.team_abbr}`)}
+                                                className="text-blue-400 hover:text-blue-300 transition py-1 px-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                aria-label={`View ${team.team_abbr} details`}
+                                            >
+                                                Team Details
+                                            </button>
+                                            <button
+                                                onClick={() => navigate(`/team/${team.team_abbr}/players`)}
+                                                className="text-green-400 hover:text-green-300 transition py-1 px-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                                                aria-label={`View ${team.team_abbr} roster`}
+                                            >
+                                                View Roster
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
