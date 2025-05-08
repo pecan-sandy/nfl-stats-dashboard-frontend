@@ -8,6 +8,7 @@ import {
     LineChart, Line, CartesianGrid, Legend, Scatter, ScatterChart, ZAxis,
     ComposedChart, Area, Cell, ReferenceLine
 } from 'recharts';
+import { fetchPlayers } from '../api/api';
 
 // Position-specific key metrics
 const POSITION_METRICS = {
@@ -124,21 +125,27 @@ const PlayerDetail = () => {
     const [trendMetric, setTrendMetric] = useState('');
 
     useEffect(() => {
-        axios.get('http://localhost:5000/api/players')
+        setLoading(true);
+        setError(null);
+
+        fetchPlayers()
             .then(res => {
-                const found = res.data.find(p => p.gsis_id === id);
-                if (!found) throw new Error('Player not found');
+                const allFetchedPlayers = Array.isArray(res.data) ? res.data : [];
                 
-                // Calculate league averages by position
-                const posPlayers = res.data.filter(p => p.position === found.position && 
+                const found = allFetchedPlayers.find(p => p.gsis_id === id);
+                if (!found) throw new Error('Player not found in fetched data');
+                
+                const posPlayers = allFetchedPlayers.filter(p => p.position === found.position && 
                     (p.snaps_played == null || p.snaps_played >= 200));
                 
                 setPositionPlayers(posPlayers);
                 
-                // Calculate league averages
                 const avgStats = {};
-                const metrics = [...POSITION_METRICS[found.position]?.primaryStats || [], 
-                                ...POSITION_METRICS[found.position]?.advancedStats || []];
+                const calculatedPercentiles = {};
+                const metrics = [
+                    ...(POSITION_METRICS[found.position]?.primaryStats || []),
+                    ...(POSITION_METRICS[found.position]?.advancedStats || [])
+                ];
                                 
                 metrics.forEach(metric => {
                     const values = posPlayers
@@ -146,26 +153,23 @@ const PlayerDetail = () => {
                         .map(p => Number(p[metric]));
                     
                     if (values.length > 0) {
-                        // Calculate average
                         const sum = values.reduce((a, b) => a + b, 0);
                         avgStats[metric] = sum / values.length;
                         
-                        // Calculate percentile ranks
                         if (found[metric] != null) {
                             const sortedValues = [...values].sort((a, b) => a - b);
                             const playerValue = Number(found[metric]);
                             const idx = sortedValues.findIndex(v => v >= playerValue);
                             const percentile = Math.round((idx / sortedValues.length) * 100);
-                            percentileRanks[metric] = percentile;
+                            calculatedPercentiles[metric] = percentile;
                         }
                     }
                 });
                 
                 setLeagueAverages(avgStats);
-                setPercentileRanks(percentileRanks);
+                setPercentileRanks(calculatedPercentiles);
                 setPlayer(found);
                 
-                // Set default trend metric based on position
                 if (found.position === 'QB') {
                     setTrendMetric('passing_yards');
                 } else if (found.position === 'RB') {
@@ -173,12 +177,13 @@ const PlayerDetail = () => {
                 } else if (found.position === 'WR' || found.position === 'TE') {
                     setTrendMetric('receiving_yards');
                 } else {
-                    setTrendMetric('epa_per_play');
+                    const posConfig = POSITION_METRICS[found.position] || DEFAULT_STATS;
+                    setTrendMetric(posConfig.primaryStats[0] || 'epa_per_play');
                 }
             })
             .catch(err => {
-                console.error('Error loading player:', err.message);
-                setError('Failed to load player');
+                console.error('Error loading player data:', err.message);
+                setError(`Failed to load player data: ${err.message}`);
             })
             .finally(() => setLoading(false));
     }, [id]);

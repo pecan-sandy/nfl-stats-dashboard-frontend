@@ -25,6 +25,7 @@ import {
     ReferenceLine
 } from 'recharts';
 import TeamPerformanceChart from './TeamPerformanceChart';
+import { fetchTeams, fetchGames } from '../api/api'; // <-- ADD IMPORT
 
 // NFL team colors
 const TEAM_COLORS = {
@@ -243,44 +244,49 @@ const TeamDetail = () => {
 
     useEffect(() => {
         const fetchData = async () => {
+            setLoading(true); // Set loading at start
+            setError(null);
             try {
-                // Fetch team data
-                const teamsRes = await axios.get('http://localhost:5000/api/teams');
-                const allTeamsData = teamsRes.data;
+                // Use Promise.all to fetch teams and games in parallel
+                const [teamsRes, gamesRes] = await Promise.all([
+                    fetchTeams(), // Use imported function
+                    fetchGames()  // Use imported function
+                ]);
+                
+                const allTeamsData = Array.isArray(teamsRes?.data) ? teamsRes.data : [];
                 setAllTeams(allTeamsData);
                 
                 const found = allTeamsData.find((t) => t.team_abbr === abbr);
-                if (!found) throw new Error('Team not found');
+                if (!found) throw new Error('Team not found in fetched data');
                 setTeam(found);
 
                 // Calculate team rankings for key metrics
                 const rankings = calculateTeamRankings(found, allTeamsData);
                 setTeamRankings(rankings);
 
-                // Fetch games data
-                const gamesRes = await axios.get('http://localhost:5000/api/games');
                 // Filter for this team's games (home or away)
-                const teamGames = gamesRes.data.filter(
+                const allGamesData = Array.isArray(gamesRes?.data) ? gamesRes.data : [];
+                const teamGames = allGamesData.filter(
                     (g) => g.home_team_abbr === abbr || g.away_team_abbr === abbr
                 );
                 
                 // Sort games by ID (assuming game_id has date info)
-                const sortedGames = teamGames.sort((a, b) => a.game_id.localeCompare(b.game_id));
+                const sortedGames = teamGames.sort((a, b) => (a.game_id || '').localeCompare(b.game_id || ''));
                 setGames(sortedGames);
                 
                 if (sortedGames.length > 0) {
                     setSelectedGame(sortedGames[sortedGames.length - 1]); // Set most recent game as default
                 }
 
-                setLoading(false);
             } catch (err) {
                 console.error('Error loading team details:', err.message);
-                setError('Failed to load team details');
+                setError(`Failed to load team details: ${err.message}`);
+            } finally {
                 setLoading(false);
             }
         };
         fetchData();
-    }, [abbr]);
+    }, [abbr]); // Refetch when abbr changes
 
     // Calculate team rankings for key metrics - UPDATED
     const calculateTeamRankings = (currentTeam, allTeams) => {
