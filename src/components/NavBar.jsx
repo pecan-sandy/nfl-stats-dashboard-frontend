@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+// Remove direct axios import if no longer needed elsewhere in this file
+// import axios from 'axios'; 
 import { fetchPlayers, fetchTeams } from '../api/api'; // <-- ADD IMPORTS
 
 // NFL Team abbreviations to full names mapping

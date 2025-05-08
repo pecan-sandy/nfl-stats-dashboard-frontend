@@ -264,17 +264,18 @@ const PlayerList = () => {
             .then((res) => {
                 // Ensure res.data is an array before filtering
                 const allFetchedPlayers = Array.isArray(res.data) ? res.data : [];
-                setAllPlayers(allFetchedPlayers);
+                setAllPlayers(allFetchedPlayers); // Store all players if needed for context
 
+                // Filter for the specific team using abbr from useParams
                 const teamPlayers = allFetchedPlayers.filter(
                     (player) => player.team?.toUpperCase() === abbr.toUpperCase()
                 );
 
-                // Apply initial sort
+                // Apply initial sort by position
                 const initiallySortedPlayers = sortPlayersByPosition(teamPlayers);
 
                 setPlayers(initiallySortedPlayers);
-                setFilteredPlayers(initiallySortedPlayers); // Set initial view with sorted players
+                setFilteredPlayers(initiallySortedPlayers); // Set initial view
 
                 if (teamPlayers.length === 0) {
                     console.warn(`⚠️ No players found for team "${abbr}"`);
@@ -282,12 +283,12 @@ const PlayerList = () => {
             })
             .catch((err) => {
                 console.error('Failed to fetch players:', err.message);
-                setError('Could not load players');
+                setError('Could not load players'); // Set error state
             })
             .finally(() => {
-                setLoading(false); // Ensure loading is set to false in finally
+                setLoading(false); // Ensure loading is set to false
             });
-            
+
         // Original logic commented out
         /*
         axios
@@ -314,7 +315,7 @@ const PlayerList = () => {
                 setLoading(false);
             });
         */
-    }, [abbr]); // Keep abbr dependency, so it refetches if the team abbreviation changes
+    }, [abbr]); // Keep abbr dependency
 
     // Update filtered players when search, position filter, or sort changes
     useEffect(() => {
