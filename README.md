@@ -2,7 +2,7 @@
 
 A comprehensive NFL analytics platform providing in-depth statistical analysis and visualization for teams, players, and games.
 
-![Sideline Metrics Dashboard](https://via.placeholder.com/1200x600?text=Sideline+Metrics+Dashboard)
+![Sideline Metrics Dashboard](https://sidelinemetrics.com)
 
 ## Overview
 
